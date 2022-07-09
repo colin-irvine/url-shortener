@@ -1,0 +1,3 @@
+plugins {
+    id 'url.shortener.java-library-conventions'
+}
