@@ -1,3 +1,11 @@
 plugins {
     id 'url.shortener.java-library-conventions'
 }
+
+dependencies {
+    implementation 'com.google.guava:guava:30.1.1-jre'
+    implementation 'com.amazonaws:aws-lambda-java-core:1.2.1'
+    implementation 'com.amazonaws:aws-lambda-java-events:3.11.0'
+    api project(':shortener')
+    api project(':authentication')
+}

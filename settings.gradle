@@ -8,4 +8,4 @@
  */
 
 rootProject.name = 'url-shortener'
-include('app', 'list', 'utilities', 'handler')
+include('app', 'list', 'utilities', 'handler', 'shortener', 'authentication')
