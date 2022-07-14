@@ -23,38 +23,46 @@ public class LambdaHandler implements RequestHandler<APIGatewayProxyRequestEvent
 
     @Override
     public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent event, Context context) {
-        // TODO: parse event and make sure it is good
-        // TODO: for an event to be good, it must have a good path
-        // TODO: handle auth
+        setRequestEvent(event);
+        try {
+            checkRequest();
+            checkAuthentication();
 
-        this.setRequestEvent(event);
+            if (isShortenRequest()) {
+                handleShortenRequest();
+            }
+            if (isLengthenRequest()) {
+                handleLengthenRequest();
+            }
 
-        if (isHttpMethodNotAllowed()) {
-            return this.create405Response();
         }
-
-        if (isAuthorizationHeaderNotPresent()) {
-            return this.create401Response();
+        catch (HttpException exc) {
+            createErrorResponse(exc);
         }
-
-        if (isNotAuthorized()) {
-            return this.create403Response();
+        catch (Exception exc) {
+            createErrorResponse(exc);
         }
-
-        if (isShortenRequest()) {
-            // method and auth are good, now let's try and shorten something!
-            return this.handleShortenRequest();
+        finally {
+            return responseEvent;
         }
-
-        if (isLengthenRequest()) {
-            return this.handleLengthenRequest();
-        }
-
-        return responseEvent;
     }
 
     private void setRequestEvent(APIGatewayProxyRequestEvent event) {
         this.requestEvent = event;
+    }
+
+    private void checkRequest() throws HttpException {
+        if (isHttpMethodNotAllowed()) {
+            throw new HttpException("HTTP Method not allowed", 405);
+        }
+
+        if (isEventBodyBad()) {
+            throw new HttpException("Bad request", 400);
+        }
+
+        if (isEventPathBad()) {
+            throw new HttpException("Bad url path", 400);
+        }
     }
 
     private boolean isHttpMethodNotAllowed() {
@@ -63,27 +71,54 @@ public class LambdaHandler implements RequestHandler<APIGatewayProxyRequestEvent
         return (method.equals("GET") || method.equals("POST")) == false;
     }
 
+    private boolean isEventBodyBad() {
+        if (this.requestEvent.getHttpMethod() == "GET") {
+            return false;
+        }
+        if (this.requestEvent.getBody().isBlank()) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private boolean isEventPathBad() {
+        return this.extractShortNameFromPath().isBlank();
+    }
+
+    private void checkAuthentication() throws HttpException {
+        if (isAuthorizationHeaderNotPresent()) {
+            throw new HttpException("No Authorization header present", 401);
+        }
+
+        if (isNotAuthorized()) {
+            throw new HttpException("Unauthorized client", 403);
+        }
+    }
+
     private boolean isAuthorizationHeaderNotPresent() {
         Map<String, String> headers = this.requestEvent.getHeaders();
 
         return headers.containsKey("Authorization") == false;
     }
 
-    private APIGatewayProxyResponseEvent create405Response() {
-        String method = this.requestEvent.getHttpMethod();
-        String body = String.format("HTTP Method \'%s\' is not allowed.", method);
-        this.responseEvent.setStatusCode(405);
-        this.responseEvent.setBody(body);
-
-        return this.responseEvent;
+    private void handleShortenRequest() throws Exception {
+        String shortName, longName = requestEvent.getBody();
+        shortName = shortener.getShortName(longName);
+        responseEvent.setBody(shortName);
+        responseEvent.setStatusCode(200);
     }
 
-    private APIGatewayProxyResponseEvent create401Response() {
-        String body = "Authorization header missing.";
-        this.responseEvent.setStatusCode(401);
-        this.responseEvent.setBody(body);
+    private void handleLengthenRequest() throws Exception {
+        String longName, shortname = extractShortNameFromPath();
+        longName = shortener.getLongName(shortname);
+        responseEvent.setBody(longName);
+        responseEvent.setStatusCode(200);
 
-        return this.responseEvent;
+        if (longName == null) {
+            throw new HttpException("Long name not found", 404);
+        }
+
     }
 
     private boolean isShortenRequest() {
@@ -92,38 +127,6 @@ public class LambdaHandler implements RequestHandler<APIGatewayProxyRequestEvent
 
     private boolean isLengthenRequest() {
         return this.requestEvent.getHttpMethod().equals("GET");
-    }
-
-    private APIGatewayProxyResponseEvent handleShortenRequest() {
-        // make sure request is good (event body)
-        // shorten Url
-        // save to storage
-        // could this be as simple as:
-        // try {
-        //      shortName = this.shortener.getShortName(longName);
-        //
-        // } catch (Something exc) { // handle state changes here }
-
-        return null;
-    }
-
-    private APIGatewayProxyResponseEvent handleLengthenRequest() {
-        // make sure request is good (event path)
-        // retrieve from storage
-        // this.shortener.getLongName(shortName);
-        String shortName = this.extractShortNameFromPath();
-        String longName = this.shortener.getLongName(shortName);
-
-        if (longName == null) {
-            this.responseEvent.setStatusCode(404);
-            //this.responseEvent.setBody("body");
-            return this.responseEvent;
-        }
-
-        this.responseEvent.setBody(longName);
-        this.responseEvent.setStatusCode(200);
-
-        return this.responseEvent;
     }
 
     private String extractShortNameFromPath() {
@@ -138,9 +141,26 @@ public class LambdaHandler implements RequestHandler<APIGatewayProxyRequestEvent
         return this.authentication.verifyToken() == false;
     }
 
-    private APIGatewayProxyResponseEvent create403Response() {
-        this.responseEvent.setStatusCode(403);
+    private class HttpException extends Exception {
+        private String errorMessage;
+        private int statusCode;
+        public HttpException(String errorMessage, int statusCode) {
+            super(errorMessage);
+            this.errorMessage = errorMessage;
+            this.statusCode = statusCode;
+        }
+    }
 
+    private APIGatewayProxyResponseEvent createErrorResponse(HttpException exc) {
+        this.responseEvent.setStatusCode(exc.statusCode);
+        this.responseEvent.setBody(exc.errorMessage);
+
+        return this.responseEvent;
+    }
+
+    private APIGatewayProxyResponseEvent createErrorResponse(Exception exc) {
+        this.responseEvent.setBody(exc.getMessage());
+        this.responseEvent.setStatusCode(500);
         return this.responseEvent;
     }
 }
